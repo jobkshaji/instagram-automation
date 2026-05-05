@@ -150,35 +150,6 @@ function parseReelsFile() {
     const altMatch = block.match(/📸 Alt Text: ([\s\S]+?)(?=\n[👍🤩🔗📅🏷️💬🎵❤️👁️💭]|\n{2,})/);
     const altText = altMatch ? altMatch[1].trim() : '';
     
-    // Use description or alt text as caption
-    const caption = description || altText;
-    
-    // Extract hashtags from block (new format) or parse from caption/altText
-    let hashtags = [];
-    const hashtagsMatch = block.match(/🏷️\s*Hashtags: (.+)/);
-    if (hashtagsMatch) {
-      hashtags = hashtagsMatch[1].trim().split(/\s+/).filter(h => h.startsWith('#'));
-    }
-    // Fallback: extract from alt text (where Instagram puts them)
-    if (hashtags.length === 0 && altText) {
-      hashtags = extractHashtags(altText);
-    }
-    // Final fallback: extract from caption
-    if (hashtags.length === 0) {
-      hashtags = extractHashtags(caption);
-    }
-    
-    // Extract mentions from block (new format) or parse from caption
-    let mentions = [];
-    const mentionsMatch = block.match(/💬\s*Mentions: (.+)/);
-    if (mentionsMatch) {
-      mentions = mentionsMatch[1].trim().split(/\s+/).filter(m => m.startsWith('@'));
-    }
-    // Fallback: extract from caption
-    if (mentions.length === 0) {
-      mentions = extractMentions(caption);
-    }
-    
     // Extract audio
     const audioMatch = block.match(/🎵\s*Audio: (.+)/);
     const audio = audioMatch ? audioMatch[1].trim() : '';
@@ -194,6 +165,61 @@ function parseReelsFile() {
     // Extract likes
     const likesMatch = block.match(/❤️\s*Likes: (.+)/);
     const likes = likesMatch ? likesMatch[1].trim() : '';
+    
+    // Use description or alt text as caption
+    // BUT if description looks like a date (February 22) or UI text (Notifications),
+    // use the views/comments field which often contains the real caption
+    let caption = description || altText;
+    
+    // Check if caption is invalid (date pattern or UI label)
+    const isInvalidCaption = (text) => {
+      if (!text || text.length < 5) return true;
+      // Date pattern: "February 22", "March 15"
+      const datePattern = /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}$/i;
+      if (datePattern.test(text)) return true;
+      // UI labels
+      const uiLabels = ['notifications', 'messages', 'search', 'home', 'profile', 'menu', 'settings'];
+      if (uiLabels.includes(text.toLowerCase().trim())) return true;
+      return false;
+    };
+    
+    // If caption is invalid, try to get it from views or comments
+    if (isInvalidCaption(caption)) {
+      // Views field sometimes contains the full post text
+      if (views && views.length > 20 && !views.includes('View all') && !views.includes('replies')) {
+        caption = views;
+      }
+      // Comments field often has the caption
+      else if (comments && comments.length > 20 && !comments.includes('comments from Facebook')) {
+        caption = comments;
+      }
+    }
+    
+    // Extract hashtags from block (new format) or parse from caption/altText
+    let hashtags = [];
+    const hashtagsMatch = block.match(/🏷️\s*Hashtags: (.+)/);
+    if (hashtagsMatch) {
+      hashtags = hashtagsMatch[1].trim().split(/\s+/).filter(h => h.startsWith('#'));
+    }
+    // Extract from the (possibly corrected) caption
+    if (hashtags.length === 0) {
+      hashtags = extractHashtags(caption);
+    }
+    // Fallback: extract from alt text (where Instagram puts them)
+    if (hashtags.length === 0 && altText) {
+      hashtags = extractHashtags(altText);
+    }
+    
+    // Extract mentions from block (new format) or parse from caption
+    let mentions = [];
+    const mentionsMatch = block.match(/💬\s*Mentions: (.+)/);
+    if (mentionsMatch) {
+      mentions = mentionsMatch[1].trim().split(/\s+/).filter(m => m.startsWith('@'));
+    }
+    // Fallback: extract from caption
+    if (mentions.length === 0) {
+      mentions = extractMentions(caption);
+    }
     
     // Extract date
     const dateMatch = block.match(/📅\s*Date: (.+)/);

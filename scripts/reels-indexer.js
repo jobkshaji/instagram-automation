@@ -160,11 +160,13 @@ function buildSearchIndex(db) {
       }
     }
 
-    // Index keywords from caption and alt text
+    // Index keywords from caption, alt text, comments, and views
     const keywords = [
       ...(reel.caption || '').toLowerCase().split(/\s+/),
       ...(reel.altText || '').toLowerCase().split(/\s+/),
-      ...(reel.audio || '').toLowerCase().split(/\s+/)
+      ...(reel.audio || '').toLowerCase().split(/\s+/),
+      ...(reel.comments || '').toLowerCase().split(/\s+/),
+      ...(reel.views || '').toLowerCase().split(/\s+/)
     ].filter(w => w.length > 3);
 
     keywords.forEach(word => {
@@ -244,30 +246,73 @@ async function extractReelDetails(page, shortcode) {
         }
       }
 
-      // Try to find caption with comprehensive selectors
+      // Try to find caption with improved selectors
+      // Instagram captions are typically in specific structures, not h1 or random spans
       const captionSelectors = [
-        'h1[data-testid="content-title"]',
-        'h1[dir="auto"]',
-        'article h1',
-        'div[dir="auto"] span',
-        'article div[dir="auto"]',
-        '[role="dialog"] div[dir="auto"]',
-        'span[dir="auto"]',
-        '[data-testid="post-content"] span'
+        // Main caption container - most reliable
+        'article h1[dir="auto"]',
+        '[role="dialog"] h1[dir="auto"]',
+        // Post content area
+        '[data-testid="post-content"] div[dir="auto"]',
+        '[data-testid="post-content"] span[dir="auto"]',
+        // Article content
+        'article div[dir="auto"] > span[dir="auto"]',
+        'article [role="button"] div[dir="auto"]',
+        // Dialog/modal content
+        '[role="dialog"] div[dir="auto"] > span[dir="auto"]'
       ];
+      
+      // Helper to check if text looks like a caption vs UI element
+      const isValidCaption = (text) => {
+        if (!text || text.length < 5 || text.length > 2000) return false;
+        
+        // Skip date patterns like "February 22", "March 15"
+        const datePattern = /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}$/i;
+        if (datePattern.test(text)) return false;
+        
+        // Skip common UI labels
+        const uiLabels = ['notifications', 'messages', 'search', 'home', 'profile', 'menu', 'settings', 'options', 'more', 'share', 'save', 'like', 'comment'];
+        const lowerText = text.toLowerCase().trim();
+        if (uiLabels.includes(lowerText)) return false;
+        
+        // Skip if it's just a number (like comment counts)
+        if (/^\d+$/.test(text)) return false;
+        
+        return true;
+      };
       
       let fullText = '';
       for (const selector of captionSelectors) {
         const els = document.querySelectorAll(selector);
         for (const el of els) {
           const text = el.textContent?.trim();
-          if (text && text.length > 10 && text.length < 2000) {
+          if (isValidCaption(text)) {
             result.caption = text;
             fullText = text;
             break;
           }
         }
         if (result.caption) break;
+      }
+      
+      // Fallback: Try to find caption in the article's text content more carefully
+      if (!result.caption) {
+        const article = document.querySelector('article, [role="dialog"] article');
+        if (article) {
+          // Look for the longest span[dir="auto"] that's not in a header
+          const spans = article.querySelectorAll('div:not(header) span[dir="auto"], div:not([role="banner"]) span[dir="auto"]');
+          let bestText = '';
+          for (const span of spans) {
+            const text = span.textContent?.trim();
+            if (isValidCaption(text) && text.length > bestText.length) {
+              bestText = text;
+            }
+          }
+          if (bestText) {
+            result.caption = bestText;
+            fullText = bestText;
+          }
+        }
       }
       
       // Try to find alt text (often contains good descriptions)
@@ -279,17 +324,23 @@ async function extractReelDetails(page, shortcode) {
         }
       }
 
-      // Extract hashtags from caption
-      if (result.caption) {
+      // Extract hashtags from caption, comments, and views
+      const allText = [
+        result.caption || '',
+        result.comments || '',
+        result.views || ''
+      ].join(' ');
+      
+      if (allText) {
         const hashtagRegex = /#[\w\u00C0-\u017F]+/g;
-        const hashtags = result.caption.match(hashtagRegex);
+        const hashtags = allText.match(hashtagRegex);
         if (hashtags) {
           result.hashtags = [...new Set(hashtags.map(h => h.toLowerCase()))];
         }
         
         // Extract mentions (@username)
         const mentionRegex = /@[\w.]+/g;
-        const mentions = result.caption.match(mentionRegex);
+        const mentions = allText.match(mentionRegex);
         if (mentions) {
           result.mentions = [...new Set(mentions)];
         }
@@ -544,6 +595,8 @@ function searchReels(db, query) {
       reel.altText,
       reel.creator,
       reel.audio,
+      reel.comments,
+      reel.views,
       ...reel.hashtags,
       ...reel.mentions
     ].join(' ').toLowerCase();

@@ -9,6 +9,7 @@
  * 
  * Examples:
  *   node instagram-login.js myusername mypassword ./feed.png
+ *   node instagram-login.js --save lone.wolf7109 Jobjoeld5@
  *   node instagram-login.js --use-saved ./my_feed.png
  */
 

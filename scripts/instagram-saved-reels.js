@@ -69,7 +69,7 @@ async function loginToInstagram(page, username, password) {
   // Handle cookie consent
   try {
     const cookieButton = page.getByRole('button', { name: /allow all cookies|accept all/i });
-    if (await cookieButton.isVisible({ timeout: 3000 })) {
+    if (await cookieButton.isVisible({ timeout: 10000 })) {
       await cookieButton.click();
     }
   } catch (e) {}
@@ -81,8 +81,8 @@ async function loginToInstagram(page, username, password) {
 
   // Wait for login
   await Promise.race([
-    page.waitForSelector('main[role="main"]', { timeout: 15000 }),
-    page.waitForSelector('text=Save your login info?', { timeout: 15000 })
+    page.waitForSelector('main[role="main"]', { timeout: 60000 }),
+    page.waitForSelector('text=Save your login info?', { timeout: 60000 })
   ]);
 
   // Handle dialogs
@@ -129,6 +129,10 @@ async function extractSavedReels(username, outputPath, forceLogin = false) {
   });
   
   const page = await context.newPage();
+  
+  // Increase default timeout to 2 minutes for slower connections
+  page.setDefaultTimeout(120000);
+  page.setDefaultNavigationTimeout(120000);
 
   try {
     // Try to use saved cookies first
@@ -285,7 +289,7 @@ async function extractSavedReels(username, outputPath, forceLogin = false) {
       
       try {
         // Visit the reel page to get details
-        await page.goto(reel.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        await page.goto(reel.url, { waitUntil: 'domcontentloaded', timeout: 120000 });
         await page.waitForTimeout(2500);
         
         const details = await page.evaluate(() => {
@@ -336,16 +340,35 @@ async function extractSavedReels(username, outputPath, forceLogin = false) {
             }
           }
           
-          // Description/caption - comprehensive search
+          // Description/caption - improved targeting
           const descSelectors = [
-            'h1[data-testid="content-title"]',
-            'h1',
-            'article h1',
-            'article span[dir="auto"]',
-            'div[role="button"] span[dir="auto"]',
-            '[data-testid="post-content"] span',
-            'article div[dir="auto"] span'
+            'article h1[dir="auto"]',
+            '[role="dialog"] h1[dir="auto"]',
+            '[data-testid="post-content"] div[dir="auto"]',
+            '[data-testid="post-content"] span[dir="auto"]',
+            'article div[dir="auto"] > span[dir="auto"]',
+            'article [role="button"] div[dir="auto"]',
+            '[role="dialog"] div[dir="auto"] > span[dir="auto"]'
           ];
+          
+          // Helper to validate caption text
+          const isValidCaption = (text) => {
+            if (!text || text.length < 5 || text.length > 2000) return false;
+            
+            // Skip date patterns like "February 22", "March 15"
+            const datePattern = /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}$/i;
+            if (datePattern.test(text)) return false;
+            
+            // Skip common UI labels
+            const uiLabels = ['notifications', 'messages', 'search', 'home', 'profile', 'menu', 'settings', 'options', 'more', 'share', 'save', 'like', 'comment'];
+            const lowerText = text.toLowerCase().trim();
+            if (uiLabels.includes(lowerText)) return false;
+            
+            // Skip if it's just a number
+            if (/^\d+$/.test(text)) return false;
+            
+            return true;
+          };
           
           let fullText = '';
           for (const sel of descSelectors) {
@@ -353,7 +376,7 @@ async function extractSavedReels(username, outputPath, forceLogin = false) {
             for (const el of elements) {
               if (el && el.textContent) {
                 const text = el.textContent.trim();
-                if (text.length > 5) {
+                if (isValidCaption(text)) {
                   fullText = text;
                   result.description = text;
                   break;
@@ -363,18 +386,21 @@ async function extractSavedReels(username, outputPath, forceLogin = false) {
             if (result.description) break;
           }
           
-          // Also try to get text from the main content area
+          // Fallback: try main content area with filtering
           if (!result.description) {
-            const mainContent = document.querySelector('article, main, [role="main"]');
-            if (mainContent) {
-              const spans = mainContent.querySelectorAll('span[dir="auto"]');
+            const article = document.querySelector('article, [role="dialog"] article');
+            if (article) {
+              const spans = article.querySelectorAll('div:not(header) span[dir="auto"], div:not([role="banner"]) span[dir="auto"]');
+              let bestText = '';
               for (const span of spans) {
                 const text = span.textContent?.trim();
-                if (text && text.length > 10 && text.length < 2000) {
-                  result.description = text;
-                  fullText = text;
-                  break;
+                if (isValidCaption(text) && text.length > bestText.length) {
+                  bestText = text;
                 }
+              }
+              if (bestText) {
+                result.description = bestText;
+                fullText = bestText;
               }
             }
           }
