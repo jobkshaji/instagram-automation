@@ -1,8 +1,3 @@
-<<<<<<< HEAD
-# instagram-automation
-Browser automation for Instagram: persistent login, feed screenshots, and searchable saved reels extraction
-
-=======
 # Instagram Automation 🎬
 
 Browser automation for Instagram with persistent login, feed screenshots, and intelligent saved reels extraction with full-text search indexing.
@@ -200,4 +195,3 @@ PRs welcome! Please ensure:
 ---
 
 *Built with [Playwright](https://playwright.dev/) and ❤️*
->>>>>>> ae7e87d ( Readme)
